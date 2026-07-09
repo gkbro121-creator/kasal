@@ -763,6 +763,7 @@
         <div class="admin-tools">
           <button id="newVideoBtn" class="btn primary" type="button">+ New Video</button>
           <button id="exportBtn" class="btn ghost" type="button">Export Backup</button>
+          <button id="publishHtmlBtn" class="btn primary" type="button">Download Updated index.html</button>
           <label class="import-label btn ghost">Import Backup
             <input id="importInput" type="file" accept="application/json" hidden />
           </label>
@@ -955,15 +956,22 @@
 
     function loadVideos() {
       const saved = localStorage.getItem(STORAGE_KEY);
+      const publicVideos = Array.isArray(seedVideos) ? seedVideos : [];
       if (!saved) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(seedVideos));
-        return seedVideos;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(publicVideos));
+        return publicVideos;
       }
       try {
-        const parsed = JSON.parse(saved);
-        return Array.isArray(parsed) ? parsed : seedVideos;
+        const localVideos = JSON.parse(saved);
+        if (!Array.isArray(localVideos)) return publicVideos;
+        const byId = new Map();
+        publicVideos.forEach((video) => byId.set(video.id, video));
+        localVideos.forEach((video) => byId.set(video.id || cryptoId(), video));
+        const merged = Array.from(byId.values());
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        return merged;
       } catch {
-        return seedVideos;
+        return publicVideos;
       }
     }
 
@@ -1123,6 +1131,7 @@
       $("thumbnailUrl").addEventListener("input", handleThumbUrl);
       $("videoForm").addEventListener("submit", saveVideoFromForm);
       $("exportBtn").addEventListener("click", exportBackup);
+      $("publishHtmlBtn").addEventListener("click", downloadPublishedHtml);
       $("importInput").addEventListener("change", importBackup);
     }
 
@@ -1238,6 +1247,38 @@
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+    }
+
+    async function downloadPublishedHtml() {
+      try {
+        const response = await fetch(window.location.href, { cache: "no-store" });
+        let html = await response.text();
+        const safeVideos = videos.map((video) => ({
+          id: video.id || cryptoId(),
+          title: String(video.title || "Untitled"),
+          category: ["Sri Lanka", "India", "18+", "new"].includes(video.category) ? video.category : "new",
+          description: String(video.description || ""),
+          embed: String(video.embed || ""),
+          thumbnail: String(video.thumbnail || fallbackThumb),
+          createdAt: video.createdAt || new Date().toISOString()
+        }));
+        const replacement = `const seedVideos = ${JSON.stringify(safeVideos, null, 6)};`;
+        const pattern = new RegExp("const seedVideos = \\[\\s\\S]*?\\n    \\]\\.map\\(\\(item, index\\) => \\(\\{[\\s\\S]*?\\n    \\}\\)\\);|const seedVideos = \\[\\s\\S]*?\\n    \\];");
+        if (!pattern.test(html)) throw new Error("Seed video block not found");
+        html = html.replace(pattern, replacement);
+        const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "index.html";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showAlert("index.html ready", "Download වූ index.html file එක GitHub repository එකට upload/replace කළාම phone එකෙන්ත් videos පේනවා.");
+      } catch (error) {
+        showAlert("Publish failed", "Updated index.html download කරන්න බැරි වුණා. Backup JSON export කරලා මට දුන්නොත් මම final index.html එක හදලා දෙන්නම්.");
+      }
     }
 
     function importBackup(event) {
